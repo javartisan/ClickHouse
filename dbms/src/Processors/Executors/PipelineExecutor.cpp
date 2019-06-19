@@ -681,6 +681,8 @@ void PipelineExecutor::executeImpl(size_t num_threads)
         }
     }
 
+    background_executor_flag = false;
+
     threads.reserve(num_threads);
     executor_contexts.reserve(num_threads);
 

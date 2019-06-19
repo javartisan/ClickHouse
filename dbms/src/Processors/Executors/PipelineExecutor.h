@@ -115,6 +115,7 @@ private:
 
     std::mutex main_executor_mutex;
     std::atomic_bool main_executor_flag;
+    std::atomic_bool background_executor_flag;
     std::condition_variable main_executor_condvar;
 
     std::atomic<size_t> num_waiting_threads;
