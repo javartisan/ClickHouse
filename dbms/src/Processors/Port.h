@@ -67,7 +67,7 @@ protected:
             /// Pointer can store flags in case of exception in swap.
             ~DataPtr() { delete getPtr(getUInt(data) & PTR_MASK); }
 
-            DataPtr(DataPtr const &) = delete;
+            DataPtr(DataPtr const &) : data(new Data()) {}
             DataPtr& operator=(DataPtr const &) = delete;
 
             Data * operator->() const { return data; }
