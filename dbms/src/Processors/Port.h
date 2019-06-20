@@ -230,7 +230,7 @@ private:
     /// If version was set, it will be increased on each pull.
     UInt64 * version = nullptr;
 
-    bool is_finished = false;
+    mutable bool is_finished = false;
 
 public:
     using Port::Port;
@@ -262,7 +262,7 @@ public:
         return std::move(data_.chunk);
     }
 
-    bool ALWAYS_INLINE isFinished()
+    bool ALWAYS_INLINE isFinished() const
     {
         assumeConnected();
 
