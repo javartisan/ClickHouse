@@ -142,7 +142,6 @@ void PipelineExecutor::processFinishedExecutionQueue()
 
         /// ++num_waited_tasks;
         ++state->num_executed_jobs;
-        state->need_update_stream = true;
 
         if (graph[finished_job].execution_state->exception)
             std::rethrow_exception(graph[finished_job].execution_state->exception);
@@ -178,24 +177,24 @@ static void executeJob(IProcessor * processor)
     }
 }
 
-bool PipelineExecutor::tryAssignJob(ExecutionState * state)
-{
-    auto current_stream = state->current_stream;
-    for (auto & executor_context : executor_contexts)
-    {
-        if (executor_context->current_stream == current_stream)
-        {
-            ExecutionState * expected = nullptr;
-            if (executor_context->next_task_to_execute.compare_exchange_strong(expected, state))
-            {
-                ++num_tasks_to_wait;
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
+//bool PipelineExecutor::tryAssignJob(ExecutionState * state)
+//{
+//    auto current_stream = state->current_stream;
+//    for (auto & executor_context : executor_contexts)
+//    {
+//        if (executor_context->current_stream == current_stream)
+//        {
+//            ExecutionState * expected = nullptr;
+//            if (executor_context->next_task_to_execute.compare_exchange_strong(expected, state))
+//            {
+//                ++num_tasks_to_wait;
+//                return true;
+//            }
+//        }
+//    }
+//
+//    return false;
+//}
 
 void PipelineExecutor::addJob(ExecutionState * execution_state)
 {
@@ -287,54 +286,82 @@ void PipelineExecutor::expandPipeline(UInt64 pid)
     }
 }
 
-bool PipelineExecutor::addProcessorToPrepareQueueIfUpdated(Edge & edge, bool update_stream_number, UInt64 stream_number)
+bool PipelineExecutor::addProcessorToPrepareQueueIfUpdated(Edge & edge, Stack & stack)
 {
+    /// In this method we have ownership on edge, but node can be concurrently accessed.
+
     auto & node = graph[edge.to];
 
+    ExecStatus status = node.status.load();
+
     /// Don't add processor if nothing was read from port.
-    if (node.status != ExecStatus::New && edge.version == edge.prev_version)
+    if (status != ExecStatus::New && edge.version == edge.prev_version)
         return false;
 
+    if (status == ExecStatus::Finished)
+        return false;
+
+    /// Signal that node need to be prepared.
+    node.need_to_be_prepared = true;
     edge.prev_version = edge.version;
 
-    if (node.status == ExecStatus::Idle || node.status == ExecStatus::New)
-    {
-        prepare_stack.push(edge.to);
-        node.status = ExecStatus::Preparing;
+    /// Try to get ownership for node.
 
-        if (update_stream_number)
-        {
-            node.execution_state->current_stream = stream_number;
-            node.execution_state->need_update_stream = false;
-        }
+    /// Assume that current status is New or Idle. Otherwise, can't prepare node.
+    if (status != ExecStatus::New)
+        status = ExecStatus::Idle;
 
-        return true;
-    }
+    /// Statuses but New and Idle are not interesting because they own node.
+    /// Prepare will be called in owning thread before changing status.
+    while (!node.status.compare_exchange_weak(status, ExecStatus::Preparing))
+        if (!(status == ExecStatus::New || status == ExecStatus::Idle) || !node.need_to_be_prepared)
+            return false;
 
-    return false;
+    stack.push(edge.to);
+    return true;
+
 }
 
-void PipelineExecutor::prepareProcessor(UInt64 pid, bool async)
+void PipelineExecutor::prepareProcessor(UInt64 pid, Stack & stack, bool async)
 {
+    /// In this method we have ownership on node.
     auto & node = graph[pid];
 
     {
         Stopwatch watch;
-        auto status = node.processor->prepare();
-        node.execution_state->preparation_time_ns += watch.elapsed();
 
+        /// Disable flag before prepare call. Otherwise, we can skip prepare request.
+        /// Prepare can be called more times than needed, but it's ok.
+        node.need_to_be_prepared = false;
+
+        auto status = node.processor->prepare();
+
+        node.execution_state->preparation_time_ns += watch.elapsed();
         node.last_processor_status = status;
     }
 
-    auto add_neighbours_to_prepare_queue = [&, this]
+    auto add_neighbours_to_prepare_queue = [&, this] ()
     {
-        auto stream_number = node.execution_state->current_stream;
-
         for (auto & edge : node.backEdges)
-            addProcessorToPrepareQueueIfUpdated(edge, false, stream_number);
+            addProcessorToPrepareQueueIfUpdated(edge, stack);
 
         for (auto & edge : node.directEdges)
-            addProcessorToPrepareQueueIfUpdated(edge, true, stream_number);
+            addProcessorToPrepareQueueIfUpdated(edge, stack);
+    };
+
+    auto try_release_ownership = [&] ()
+    {
+        ExecStatus expected = ExecStatus::Idle;
+        node.status = ExecStatus::Idle;
+
+        if (node.need_to_be_prepared)
+        {
+            while (!node.status.compare_exchange_weak(expected, ExecStatus::Preparing))
+                if (!(expected == ExecStatus::Idle) || !node.need_to_be_prepared)
+                    return;
+
+            stack.push(pid);
+        }
     };
 
     switch (node.last_processor_status)
@@ -342,13 +369,15 @@ void PipelineExecutor::prepareProcessor(UInt64 pid, bool async)
         case IProcessor::Status::NeedData:
         {
             add_neighbours_to_prepare_queue();
-            node.status = ExecStatus::Idle;
+            try_release_ownership();
+
             break;
         }
         case IProcessor::Status::PortFull:
         {
             add_neighbours_to_prepare_queue();
-            node.status = ExecStatus::Idle;
+            try_release_ownership();
+
             break;
         }
         case IProcessor::Status::Finished:
@@ -365,9 +394,11 @@ void PipelineExecutor::prepareProcessor(UInt64 pid, bool async)
         }
         case IProcessor::Status::Async:
         {
-            node.status = ExecStatus::Executing;
-            addAsyncJob(pid);
-            break;
+            throw Exception("Async is temporary not supported.", ErrorCodes::LOGICAL_ERROR);
+
+//            node.status = ExecStatus::Executing;
+//            addAsyncJob(pid);
+//            break;
         }
         case IProcessor::Status::Wait:
         {
@@ -377,56 +408,85 @@ void PipelineExecutor::prepareProcessor(UInt64 pid, bool async)
         }
         case IProcessor::Status::ExpandPipeline:
         {
-            expandPipeline(pid);
-            /// Add node to queue again.
-            prepare_stack.push(pid);
 
-            /// node ref is not valid now.
-            graph[pid].status = ExecStatus::Preparing;
+            ExecutionState * desired = node.execution_state.get();
+            ExecutionState * expected = nullptr;
+
+            while (!node_to_expand.compare_exchange_strong(expected, desired))
+            {
+                expected = nullptr;
+                doExpandPipeline();
+            }
+
+            doExpandPipeline();
+
+            node.need_to_be_prepared = true;
+            try_release_ownership();
             break;
         }
     }
 }
 
-void PipelineExecutor::assignJobs()
+void PipelineExecutor::doExpandPipeline()
 {
-    for (auto * state : execution_states_queue)
+    std::unique_lock lock(mutex_to_expand_pipeline);
+    ++num_waiting_threads_to_expand_pipeline;
+
+    condvar_to_expand_pipeline.wait(lock, [&]()
     {
-        if (!tryAssignJob(state))
-        {
-            while (!task_queue.push(state))
-                sleep(0);
+        return num_waiting_threads_to_expand_pipeline == num_preparing_threads || node_to_expand == nullptr;
+    });
 
-            task_condvar.notify_one();
-            ++num_tasks_to_wait;
-        }
-    }
+    --num_waiting_threads_to_expand_pipeline;
 
-    execution_states_queue.clear();
-}
-
-void PipelineExecutor::processPrepareQueue()
-{
-    while (!prepare_stack.empty())
+    if (node_to_expand)
     {
-        UInt64 proc = prepare_stack.top();
-        prepare_stack.pop();
-
-        prepareProcessor(proc, false);
+        expandPipeline(node_to_expand.load()->processors_id);
+        node_to_expand = nullptr;
+        lock.unlock();
+        condvar_to_expand_pipeline.notify_all();
     }
-
-    assignJobs();
 }
 
-void PipelineExecutor::processAsyncQueue()
-{
-    UInt64 num_processors = processors.size();
-    for (UInt64 node = 0; node < num_processors; ++node)
-        if (graph[node].status == ExecStatus::Async)
-            prepareProcessor(node, true);
+//void PipelineExecutor::assignJobs()
+//{
+//    for (auto * state : execution_states_queue)
+//    {
+//        if (!tryAssignJob(state))
+//        {
+//            while (!task_queue.push(state))
+//                sleep(0);
+//
+//            task_condvar.notify_one();
+//            ++num_tasks_to_wait;
+//        }
+//    }
+//
+//    execution_states_queue.clear();
+//}
 
-    assignJobs();
-}
+//void PipelineExecutor::processPrepareQueue()
+//{
+//    while (!prepare_stack.empty())
+//    {
+//        UInt64 proc = prepare_stack.top();
+//        prepare_stack.pop();
+//
+//        prepareProcessor(proc, false);
+//    }
+//
+//    assignJobs();
+//}
+//
+//void PipelineExecutor::processAsyncQueue()
+//{
+//    UInt64 num_processors = processors.size();
+//    for (UInt64 node = 0; node < num_processors; ++node)
+//        if (graph[node].status == ExecStatus::Async)
+//            prepareProcessor(node, true);
+//
+//    assignJobs();
+//}
 
 void PipelineExecutor::execute(size_t num_threads)
 {
@@ -479,7 +539,6 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
 
     while (!finished)
     {
-        ++num_waiting_threads;
 
         /// First, find any processor to execute.
         /// Just travers graph and prepare any processor.
@@ -490,7 +549,6 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
             {
                 if (task_queue.pop(state))
                 {
-                    --num_waiting_threads;
                     ++num_waited_tasks;
                     break;
                 }
@@ -501,86 +559,24 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
             if (state)
                 break;
 
+            std::unique_lock lock(main_executor_mutex);
+
+            ++num_waiting_threads;
+
             if (num_waiting_threads == num_threads)
             {
                 finished = true;
                 finish_condvar.notify_one();
+                main_executor_condvar.notify_all();
             }
 
-//            if (!state)
-//            {
-//                Stopwatch processing_time_watch;
-//
-//                {
-//                    std::unique_lock lock(main_executor_mutex);
-//
-//                    while (!state)
-//                    {
-//                        if (finished)
-//                            break;
-//
-//                        while (!prepare_stack.empty())
-//                        {
-//                            UInt64 proc = prepare_stack.top();
-//                            prepare_stack.pop();
-//
-//                            prepareProcessor(proc, false);
-//
-//                            if (graph[proc].status == ExecStatus::Executing)
-//                            {
-//                                auto cur_state = graph[proc].execution_state.get();
-//
-//                                if (!state)
-//                                {
-//                                    ++num_tasks_to_wait;
-//                                    while (!task_queue.push(cur_state));
-//                                }
-//                                else
-//                                    state = cur_state;
-//                            }
-//                        }
-//
-//                        if (!state)
-//                        {
-//                            while (num_waited_tasks < num_tasks_to_wait)
-//                            {
-//                                if (task_queue.pop(state))
-//                                {
-//                                    ++num_waited_tasks;
-//                                    break;
-//                                }
-//                            }
-//                        }
-//
-//                        if (num_waited_tasks < num_tasks_to_wait)
-//                            main_executor_condvar.notify_all();
-//
-//                        if (state)
-//                            break;
-//
-//                        if (num_waiting_threads.fetch_add(1) + 1 == num_threads && num_waited_tasks == num_tasks_to_wait)
-//                        {
-//                            finished = true;
-//                            main_executor_condvar.notify_all();
-//                            finish_condvar.notify_one();
-//                            break;
-//                        }
-//
-//                        main_executor_condvar.wait(lock, [&]() { return finished || !prepare_stack.empty() || num_waited_tasks < num_tasks_to_wait; });
-//
-//                        num_waiting_threads.fetch_sub(1);
-//                    }
-//                }
-//
-//                processing_time_ns += processing_time_watch.elapsed();
-//            }
+            main_executor_condvar.wait(lock, [&]() { finished || num_waited_tasks < num_tasks_to_wait; });
+
+            --num_waiting_threads;
         }
 
         if (finished)
             break;
-
-        /// In case if somebody is sleeping and prepare_queue is not empty.
-        /// main_executor_condvar.notify_one();
 
         while (state)
         {
@@ -605,25 +601,26 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
 
             /// Try to execute neighbour processor.
             {
-                bool expected = false;
-                while (!main_executor_flag.compare_exchange_strong(expected, true))
-                    expected = false;
-
                 /// std::unique_lock lock(main_executor_mutex);
 
-                prepareProcessor(state->processors_id, false);
+                ++num_preparing_threads;
+                if (node_to_expand)
+                    doExpandPipeline();
+
+                Stack stack;
+                prepareProcessor(state->processors_id, stack, false);
 
                 /// Execute again if can.
                 if (graph[state->processors_id].status != ExecStatus::Executing)
                     state = nullptr;
 
                 /// Process all neighbours. Children will be on the top of stack, then parents.
-                while (!prepare_stack.empty())
+                while (!stack.empty())
                 {
-                    auto current_processor = prepare_stack.top();
-                    prepare_stack.pop();
+                    auto current_processor = stack.top();
+                    stack.pop();
 
-                    prepareProcessor(current_processor, false);
+                    prepareProcessor(current_processor, stack, false);
 
                     if (graph[current_processor].status == ExecStatus::Executing)
                     {
@@ -632,6 +629,7 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
                         if (state)
                         {
                             ++num_tasks_to_wait;
+                            main_executor_condvar.notify_one();
                             while (!task_queue.push(cur_state));
                         }
                         else
@@ -639,7 +637,9 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
                     }
                 }
 
-                main_executor_flag = false;
+                if (node_to_expand)
+                    doExpandPipeline();
+                --num_preparing_threads;
             }
 
             /// Let another thread to continue.
@@ -666,12 +666,13 @@ void PipelineExecutor::executeImpl(size_t num_threads)
     task_queue.reserve_unsafe(8192);
     finished_execution_queue.reserve_unsafe(num_threads);
 
-    while (!prepare_stack.empty())
+    Stack stack;
+    while (!stack.empty())
     {
-        UInt64 proc = prepare_stack.top();
-        prepare_stack.pop();
+        UInt64 proc = stack.top();
+        stack.pop();
 
-        prepareProcessor(proc, false);
+        prepareProcessor(proc, stack, false);
 
         if (graph[proc].status == ExecStatus::Executing)
         {
@@ -682,6 +683,8 @@ void PipelineExecutor::executeImpl(size_t num_threads)
     }
 
     background_executor_flag = false;
+    num_preparing_threads = 0;
+    node_to_expand = nullptr;
 
     threads.reserve(num_threads);
     executor_contexts.reserve(num_threads);
