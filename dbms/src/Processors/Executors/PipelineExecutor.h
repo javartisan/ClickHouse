@@ -68,6 +68,12 @@ private:
             execution_state->processor = processor;
             execution_state->processors_id = processor_id;
         }
+
+        Node(Node && other) noexcept
+            : processor(other.processor), status(ExecStatus::New)
+            , need_to_be_prepared(false), execution_state(std::move(other.execution_state))
+        {
+        }
     };
 
     using Nodes = std::vector<Node>;
