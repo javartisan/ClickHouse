@@ -570,7 +570,7 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
                 main_executor_condvar.notify_all();
             }
 
-            main_executor_condvar.wait(lock, [&]() { finished || num_waited_tasks < num_tasks_to_wait; });
+            main_executor_condvar.wait(lock, [&]() { return finished || num_waited_tasks < num_tasks_to_wait; });
 
             --num_waiting_threads;
         }
