@@ -106,21 +106,21 @@ private:
 
     Poco::Logger * log = &Poco::Logger::get("PipelineExecutor");
 
-    struct ExecutorContext
-    {
-        size_t executor_number;
-        std::atomic<ExecutionState *> next_task_to_execute;
-        std::atomic<UInt64> current_stream;
-    };
-
-    std::vector<std::unique_ptr<ExecutorContext>> executor_contexts;
-    UInt64 next_stream = 0;
-
-    std::vector<ExecutionState *> execution_states_queue;
+//    struct ExecutorContext
+//    {
+//        size_t executor_number;
+//        std::atomic<ExecutionState *> next_task_to_execute;
+//        std::atomic<UInt64> current_stream;
+//    };
+//
+//    std::vector<std::unique_ptr<ExecutorContext>> executor_contexts;
+//    UInt64 next_stream = 0;
+//
+//    std::vector<ExecutionState *> execution_states_queue;
 
     std::mutex main_executor_mutex;
     std::atomic_bool main_executor_flag;
-    std::atomic_bool background_executor_flag;
+    /// std::atomic_bool background_executor_flag;
     std::condition_variable main_executor_condvar;
 
     std::atomic<size_t> num_waiting_threads;

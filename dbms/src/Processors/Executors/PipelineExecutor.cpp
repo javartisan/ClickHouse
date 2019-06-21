@@ -700,22 +700,22 @@ void PipelineExecutor::executeImpl(size_t num_threads)
         }
     }
 
-    background_executor_flag = false;
+    /// background_executor_flag = false;
     num_preparing_threads = 0;
     node_to_expand = nullptr;
 
     threads.reserve(num_threads);
-    executor_contexts.reserve(num_threads);
+    /// executor_contexts.reserve(num_threads);
 
     auto thread_group = CurrentThread::getGroup();
 
     for (size_t i = 0; i < num_threads; ++i)
     {
-        executor_contexts.emplace_back(std::make_unique<ExecutorContext>());
-        auto * executor_context = executor_contexts.back().get();
-
-        executor_context->executor_number = i;
-        executor_context->next_task_to_execute = nullptr;
+//        executor_contexts.emplace_back(std::make_unique<ExecutorContext>());
+//        auto * executor_context = executor_contexts.back().get();
+//
+//        executor_context->executor_number = i;
+//        executor_context->next_task_to_execute = nullptr;
 
         threads.emplace_back([this, thread_group, num_threads]
         {
