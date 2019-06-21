@@ -154,7 +154,7 @@ protected:
             Data * desired = getPtr(flags);
 
             while (!data.compare_exchange_weak(expected, desired))
-                desired = getPtr((getUInt(expected) & FLAGS_MASK & (~mask)) | flags | getUInt(expected));
+                desired = getPtr((getUInt(expected) & FLAGS_MASK & (~mask)) | flags | (getUInt(expected) & PTR_MASK));
 
             return getUInt(expected) & FLAGS_MASK;
         }
