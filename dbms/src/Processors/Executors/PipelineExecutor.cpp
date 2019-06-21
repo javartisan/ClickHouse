@@ -550,7 +550,7 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
         }
         catch (...)
         {
-            state->exception = std::current_exception();
+            graph[pid].execution_state->exception = std::current_exception();
             finish_execution();
         }
     };
