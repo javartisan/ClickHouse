@@ -255,7 +255,7 @@ void PipelineExecutor::addAsyncJob(UInt64 pid)
     ++num_tasks_to_wait;
 }
 
-void PipelineExecutor::expandPipeline(UInt64 pid)
+void PipelineExecutor::expandPipeline(Stack & stack, UInt64 pid)
 {
     auto & cur_node = graph[pid];
     auto new_processors = cur_node.processor->expandPipeline();
@@ -280,7 +280,7 @@ void PipelineExecutor::expandPipeline(UInt64 pid)
             if (graph[node].status == ExecStatus::Idle || graph[node].status == ExecStatus::New)
             {
                 graph[node].status = ExecStatus::Preparing;
-                prepare_stack.push(node);
+                stack.push(node);
             }
         }
     }
@@ -415,10 +415,10 @@ void PipelineExecutor::prepareProcessor(UInt64 pid, Stack & stack, bool async)
             while (!node_to_expand.compare_exchange_strong(expected, desired))
             {
                 expected = nullptr;
-                doExpandPipeline();
+                doExpandPipeline(stack);
             }
 
-            doExpandPipeline();
+            doExpandPipeline(stack);
 
             node.need_to_be_prepared = true;
             try_release_ownership();
@@ -427,7 +427,7 @@ void PipelineExecutor::prepareProcessor(UInt64 pid, Stack & stack, bool async)
     }
 }
 
-void PipelineExecutor::doExpandPipeline()
+void PipelineExecutor::doExpandPipeline(Stack & stack)
 {
     std::unique_lock lock(mutex_to_expand_pipeline);
     ++num_waiting_threads_to_expand_pipeline;
@@ -441,7 +441,7 @@ void PipelineExecutor::doExpandPipeline()
 
     if (node_to_expand)
     {
-        expandPipeline(node_to_expand.load()->processors_id);
+        expandPipeline(stack, node_to_expand.load()->processors_id);
         node_to_expand = nullptr;
         lock.unlock();
         condvar_to_expand_pipeline.notify_all();
@@ -617,11 +617,12 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
             {
                 /// std::unique_lock lock(main_executor_mutex);
 
+                Stack stack;
+
                 ++num_preparing_threads;
                 if (node_to_expand)
-                    doExpandPipeline();
+                    doExpandPipeline(stack);
 
-                Stack stack;
 
                 prepare_processor(state->processors_id, stack);
 
@@ -632,28 +633,31 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
                 /// Process all neighbours. Children will be on the top of stack, then parents.
                 while (!stack.empty() && !finished)
                 {
-                    auto current_processor = stack.top();
-                    stack.pop();
-
-                    prepare_processor(current_processor, stack);
-
-                    if (graph[current_processor].status == ExecStatus::Executing)
+                    while (!stack.empty() && !finished)
                     {
-                        auto cur_state = graph[current_processor].execution_state.get();
+                        auto current_processor = stack.top();
+                        stack.pop();
 
-                        if (state)
+                        prepare_processor(current_processor, stack);
+
+                        if (graph[current_processor].status == ExecStatus::Executing)
                         {
-                            ++num_tasks_to_wait;
-                            main_executor_condvar.notify_one();
-                            while (!task_queue.push(cur_state));
-                        }
-                        else
-                            state = cur_state;
-                    }
-                }
+                            auto cur_state = graph[current_processor].execution_state.get();
 
-                if (node_to_expand)
-                    doExpandPipeline();
+                            if (state)
+                            {
+                                ++num_tasks_to_wait;
+                                main_executor_condvar.notify_one();
+                                while (!task_queue.push(cur_state));
+                            }
+                            else
+                                state = cur_state;
+                        }
+                    }
+
+                    if (node_to_expand)
+                        doExpandPipeline(stack);
+                }
                 --num_preparing_threads;
             }
 

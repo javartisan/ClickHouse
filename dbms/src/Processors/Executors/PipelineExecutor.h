@@ -149,8 +149,8 @@ private:
 
     bool addEdges(UInt64 node);
     void buildGraph();
-    void expandPipeline(UInt64 pid);
-    void doExpandPipeline();
+    void expandPipeline(Stack & stack, UInt64 pid);
+    void doExpandPipeline(Stack & stack);
 
     /// Pipeline execution related methods.
     void addChildlessProcessorsToQueue(Stack & stack);
