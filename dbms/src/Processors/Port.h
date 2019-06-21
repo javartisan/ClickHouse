@@ -144,7 +144,7 @@ protected:
             flags = data_.swap(data, 0, HAS_DATA);
 
             /// It's ok to check because this flag can be changed only by pulling thread.
-            if (unlikely(flags & IS_NEEDED))
+            if (unlikely((flags & IS_NEEDED) == 0))
                 throw Exception("Cannot pull block from port which is not needed.", ErrorCodes::LOGICAL_ERROR);
 
             if (unlikely((flags & HAS_DATA) == 0))
