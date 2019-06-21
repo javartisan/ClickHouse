@@ -590,7 +590,7 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
         }
 
         if (finished)
-            finish_execution();
+            break;
 
         while (state)
         {
@@ -606,7 +606,7 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
             }
 
             if (state->exception)
-                finished = true;
+                finish_execution();
 
             if (finished)
                 break;
