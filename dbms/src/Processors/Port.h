@@ -61,7 +61,7 @@ protected:
         public:
             DataPtr() : data(new Data())
             {
-                if (unlikely((getUInt(data) & PTR_MASK) != 0))
+                if (unlikely((getUInt(data) & FLAGS_MASK) != 0))
                     throw Exception("Not alignment memory for Port.", ErrorCodes::LOGICAL_ERROR);
             }
             /// Pointer can store flags in case of exception in swap.
@@ -108,7 +108,7 @@ protected:
         /// Not finished, not needed, has not data.
         State() : data(new Data())
         {
-            if (unlikely((getUInt(data) & PTR_MASK) != 0))
+            if (unlikely((getUInt(data) & FLAGS_MASK) != 0))
                 throw Exception("Not alignment memory for Port.", ErrorCodes::LOGICAL_ERROR);
         }
 
