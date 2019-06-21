@@ -535,6 +535,26 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
 
     ExecutionState * state = nullptr;
 
+    auto finish_execution = [&]()
+    {
+        finished = true;
+        finish_condvar.notify_one();
+        main_executor_condvar.notify_all();
+    };
+
+    auto prepare_processor = [&](UInt64 pid, Stack & stack)
+    {
+        try
+        {
+            prepareProcessor(pid, stack, false);
+        }
+        catch (...)
+        {
+            state->exception = std::current_exception();
+            finish_execution();
+        }
+    };
+
     while (!finished)
     {
 
@@ -562,11 +582,7 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
             ++num_waiting_threads;
 
             if (num_waiting_threads == num_threads)
-            {
-                finished = true;
-                finish_condvar.notify_one();
-                main_executor_condvar.notify_all();
-            }
+                finish_execution();
 
             main_executor_condvar.wait(lock, [&]() { return finished || num_waited_tasks < num_tasks_to_wait; });
 
@@ -606,19 +622,20 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
                     doExpandPipeline();
 
                 Stack stack;
-                prepareProcessor(state->processors_id, stack, false);
+
+                prepare_processor(state->processors_id, stack);
 
                 /// Execute again if can.
                 if (graph[state->processors_id].status != ExecStatus::Executing)
                     state = nullptr;
 
                 /// Process all neighbours. Children will be on the top of stack, then parents.
-                while (!stack.empty())
+                while (!stack.empty() && !finished)
                 {
                     auto current_processor = stack.top();
                     stack.pop();
 
-                    prepareProcessor(current_processor, stack, false);
+                    prepare_processor(current_processor, stack);
 
                     if (graph[current_processor].status == ExecStatus::Executing)
                     {
