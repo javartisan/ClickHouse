@@ -209,9 +209,9 @@ void PipelineExecutor::addJob(ExecutionState * execution_state)
 
             try
             {
-                /// Stopwatch watch;
+                Stopwatch watch;
                 executeJob(execution_state->processor);
-                /// execution_state->execution_time_ns += watch.elapsed();
+                execution_state->execution_time_ns += watch.elapsed();
 
                 ++execution_state->num_executed_jobs;
             }
