@@ -117,14 +117,14 @@ void PipelineExecutor::buildGraph()
         addEdges(node);
 }
 
-void PipelineExecutor::addChildlessProcessorsToQueue()
+void PipelineExecutor::addChildlessProcessorsToQueue(Stack & stack)
 {
     UInt64 num_processors = processors.size();
     for (UInt64 proc = 0; proc < num_processors; ++proc)
     {
         if (graph[proc].directEdges.empty())
         {
-            prepare_stack.push(proc);
+            stack.push(proc);
             graph[proc].status = ExecStatus::Preparing;
         }
     }
@@ -490,8 +490,6 @@ void PipelineExecutor::doExpandPipeline()
 
 void PipelineExecutor::execute(size_t num_threads)
 {
-    addChildlessProcessorsToQueue();
-
     try
     {
         /// Wait for all tasks to finish in case of exception.
@@ -667,6 +665,9 @@ void PipelineExecutor::executeImpl(size_t num_threads)
     finished_execution_queue.reserve_unsafe(num_threads);
 
     Stack stack;
+
+    addChildlessProcessorsToQueue(stack);
+
     while (!stack.empty())
     {
         UInt64 proc = stack.top();

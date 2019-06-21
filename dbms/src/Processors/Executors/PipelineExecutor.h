@@ -153,7 +153,7 @@ private:
     void doExpandPipeline();
 
     /// Pipeline execution related methods.
-    void addChildlessProcessorsToQueue();
+    void addChildlessProcessorsToQueue(Stack & stack);
     void processFinishedExecutionQueue();
     void processFinishedExecutionQueueSafe();
     bool addProcessorToPrepareQueueIfUpdated(Edge & edge, Stack & stack);
