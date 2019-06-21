@@ -89,10 +89,7 @@ protected:
                 Data * desired = getPtr(flags | getUInt(data));
 
                 while (!value.compare_exchange_weak(expected, desired))
-                {
-                    flags |= getUInt(expected) & (~mask);
-                    desired = getPtr(flags | getUInt(data));
-                }
+                    desired = getPtr((getUInt(expected) & FLAGS_MASK & (~mask)) | flags | getUInt(data));
 
                 /// It's not very safe. In case of exception after exchange and before assigment we will get leak.
                 /// Don't know how to make it better.
@@ -157,7 +154,7 @@ protected:
             Data * desired = getPtr(flags);
 
             while (!data.compare_exchange_weak(expected, desired))
-                desired = getPtr((getUInt(expected) & (~mask)) | flags);
+                desired = getPtr((getUInt(expected) & FLAGS_MASK & (~mask)) | flags);
 
             return getUInt(expected) & FLAGS_MASK;
         }
