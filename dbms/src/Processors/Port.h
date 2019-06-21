@@ -249,6 +249,19 @@ public:
 
         is_finished = flags & State::IS_FINISHED;
 
+        if (unlikely(!data->exception && data->chunk.getNumColumns() != header.columns()))
+        {
+            auto & chunk = data->chunk;
+
+            String msg = "Invalid number of columns in chunk pulled from OutputPort. Expected "
+                         + std::to_string(header.columns()) + ", found " + std::to_string(chunk.getNumColumns()) + '\n';
+
+            msg += "Header: " + header.dumpStructure() + '\n';
+            msg += "Chunk: " + chunk.dumpStructure() + '\n';
+
+            throw Exception(msg, ErrorCodes::LOGICAL_ERROR);
+        }
+
         return std::move(*data);
     }
 
