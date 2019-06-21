@@ -93,7 +93,7 @@ protected:
 
                 /// It's not very safe. In case of exception after exchange and before assigment we will get leak.
                 /// Don't know how to make it better.
-                data = getPtr(getUInt(data) & PTR_MASK);
+                data = getPtr(getUInt(expected) & PTR_MASK);
 
                 return getUInt(expected) & FLAGS_MASK;
             }
