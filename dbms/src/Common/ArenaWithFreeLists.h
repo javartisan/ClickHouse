@@ -5,6 +5,13 @@
 #include <Common/BitHelpers.h>
 
 
+#undef ASAN_POISON_MEMORY_REGION
+#define ASAN_POISON_MEMORY_REGION(addr, size) \
+    fprintf(stderr, "poison (fl) %zu bytes at %p\n", \
+        static_cast<size_t>(size), static_cast<const void*>(addr)); \
+  __asan_poison_memory_region((addr), (size))
+
+
 namespace DB
 {
 

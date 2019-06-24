@@ -12,6 +12,13 @@
 #include <Common/Allocator.h>
 
 
+#undef ASAN_POISON_MEMORY_REGION
+#define ASAN_POISON_MEMORY_REGION(addr, size) \
+    fprintf(stderr, "poison (r) %zu bytes at %p\n", \
+        size, static_cast<const void*>(addr)); \
+  __asan_poison_memory_region((addr), (size))
+
+
 namespace ProfileEvents
 {
     extern const Event ArenaAllocChunks;
