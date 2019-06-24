@@ -619,7 +619,7 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
                 /// Process all neighbours. Children will be on the top of stack, then parents.
                 while ((!stack.empty() || !state) && !finished)
                 {
-                    while (!state && !finished)
+                    while (!state && !stack.empty() && !finished)
                     {
                         auto current_processor = stack.top();
                         stack.pop();
