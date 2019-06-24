@@ -597,20 +597,6 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
             if (finished)
                 break;
 
-            addJob(state);
-
-            {
-                Stopwatch execution_time_watch;
-                state->job();
-                execution_time_ns += execution_time_watch.elapsed();
-            }
-
-            if (state->exception)
-                finish_execution();
-
-            if (finished)
-                break;
-
             Stopwatch processing_time_watch;
 
             /// Try to execute neighbour processor.
@@ -631,28 +617,29 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
                     state = nullptr;
 
                 /// Process all neighbours. Children will be on the top of stack, then parents.
-                while (!stack.empty() && !finished)
+                while ((!stack.empty() || !state) && !finished)
                 {
-                    while (!stack.empty() && !finished)
+                    while (!state && !finished)
                     {
                         auto current_processor = stack.top();
                         stack.pop();
 
                         prepare_processor(current_processor, stack);
 
-                        if (graph[current_processor].status == ExecStatus::Executing)
-                        {
-                            auto cur_state = graph[current_processor].execution_state.get();
+                        auto cur_state = graph[current_processor].execution_state.get();
 
-                            if (state)
-                            {
-                                ++num_tasks_to_wait;
-                                main_executor_condvar.notify_one();
-                                while (!task_queue.push(cur_state));
-                            }
-                            else
-                                state = cur_state;
-                        }
+                        if (graph[current_processor].status == ExecStatus::Executing)
+                            state = cur_state;
+                    }
+
+                    while (!stack.empty())
+                    {
+                        auto cur_state = graph[stack.top()].execution_state.get();
+                        stack.pop();
+
+                        ++num_tasks_to_wait;
+                        main_executor_condvar.notify_one();
+                        while (!task_queue.push(cur_state));
                     }
 
                     if (node_to_expand)
@@ -661,10 +648,29 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
                 --num_preparing_threads;
             }
 
+
             /// Let another thread to continue.
             /// main_executor_condvar.notify_all();
 
             processing_time_ns += processing_time_watch.elapsed();
+
+
+            if (!state)
+                continue;
+
+            addJob(state);
+
+            {
+                Stopwatch execution_time_watch;
+                state->job();
+                execution_time_ns += execution_time_watch.elapsed();
+            }
+
+            if (state->exception)
+                finish_execution();
+
+            if (finished)
+                break;
         }
     }
 
@@ -694,14 +700,9 @@ void PipelineExecutor::executeImpl(size_t num_threads)
         UInt64 proc = stack.top();
         stack.pop();
 
-        prepareProcessor(proc, stack, false);
-
-        if (graph[proc].status == ExecStatus::Executing)
-        {
-            auto cur_state = graph[proc].execution_state.get();
-            ++num_tasks_to_wait;
-            while (!task_queue.push(cur_state));
-        }
+        auto cur_state = graph[proc].execution_state.get();
+        ++num_tasks_to_wait;
+        while (!task_queue.push(cur_state));
     }
 
     /// background_executor_flag = false;
