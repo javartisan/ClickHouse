@@ -328,7 +328,7 @@ void PipelineExecutor::prepareProcessor(UInt64 pid, Stack & stack, bool async)
     auto & node = graph[pid];
 
     {
-        Stopwatch watch;
+        /// Stopwatch watch;
 
         /// Disable flag before prepare call. Otherwise, we can skip prepare request.
         /// Prepare can be called more times than needed, but it's ok.
@@ -336,7 +336,7 @@ void PipelineExecutor::prepareProcessor(UInt64 pid, Stack & stack, bool async)
 
         auto status = node.processor->prepare();
 
-        node.execution_state->preparation_time_ns += watch.elapsed();
+        /// node.execution_state->preparation_time_ns += watch.elapsed();
         node.last_processor_status = status;
     }
 
