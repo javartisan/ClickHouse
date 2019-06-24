@@ -617,7 +617,7 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
                     state = nullptr;
 
                 /// Process all neighbours. Children will be on the top of stack, then parents.
-                while ((!stack.empty() || !state) && !finished)
+                while (!stack.empty() && !finished)
                 {
                     while (!state && !stack.empty() && !finished)
                     {
@@ -632,7 +632,7 @@ void PipelineExecutor::executeSingleThread(size_t num_threads)
                             state = cur_state;
                     }
 
-                    while (!stack.empty())
+                    while (!stack.empty() && !finished)
                     {
                         auto cur_state = graph[stack.top()].execution_state.get();
                         stack.pop();
