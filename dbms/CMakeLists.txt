@@ -2,6 +2,10 @@ if (USE_INCLUDE_WHAT_YOU_USE)
     set (CMAKE_CXX_INCLUDE_WHAT_YOU_USE ${IWYU_PATH})
 endif ()
 
+if (USE_CLANG_TIDY)
+    set (CMAKE_CXX_CLANG_TIDY "${DO_CLANG_TIDY}")
+endif ()
+
 if(COMPILER_PIPE)
     set(MAX_COMPILER_MEMORY 2500)
 else()
@@ -109,6 +113,11 @@ add_headers_and_sources(dbms src/Storages/Distributed)
 add_headers_and_sources(dbms src/Storages/MergeTree)
 add_headers_and_sources(dbms src/Client)
 add_headers_and_sources(dbms src/Formats)
+
+if(USE_RDKAFKA)
+    add_headers_and_sources(dbms src/Storages/Kafka)
+endif()
+
 
 list (APPEND clickhouse_common_io_sources ${CONFIG_BUILD})
 list (APPEND clickhouse_common_io_headers ${CONFIG_VERSION} ${CONFIG_COMMON})
@@ -218,13 +227,21 @@ target_link_libraries(clickhouse_common_io
     roaring
 )
 
+if (USE_RDKAFKA)
+    target_link_libraries(dbms PRIVATE ${CPPKAFKA_LIBRARY} ${RDKAFKA_LIBRARY})
+    if(NOT USE_INTERNAL_RDKAFKA_LIBRARY)
+        target_include_directories(dbms SYSTEM BEFORE PRIVATE ${RDKAFKA_INCLUDE_DIR})
+    endif()
+endif()
+
 
 if(RE2_INCLUDE_DIR)
     target_include_directories(clickhouse_common_io SYSTEM BEFORE PUBLIC ${RE2_INCLUDE_DIR})
 endif()
 
-if (USE_LFALLOC)
-    target_include_directories (clickhouse_common_io SYSTEM BEFORE PUBLIC ${LFALLOC_INCLUDE_DIR})
+if (USE_MIMALLOC)
+    target_include_directories (clickhouse_common_io SYSTEM BEFORE PUBLIC ${MIMALLOC_INCLUDE_DIR})
+    target_link_libraries (clickhouse_common_io PRIVATE ${MIMALLOC_LIBRARY})
 endif ()
 
 if(CPUID_LIBRARY)
@@ -241,6 +258,8 @@ target_link_libraries (dbms
         PRIVATE
     clickhouse_parsers
     clickhouse_common_config
+    clickhouse_common_zookeeper
+    string_utils # FIXME: not sure if it's private
         PUBLIC
     clickhouse_common_io
         PRIVATE
@@ -250,6 +269,7 @@ target_link_libraries (dbms
         PRIVATE
     ${BTRIE_LIBRARIES}
     ${Boost_PROGRAM_OPTIONS_LIBRARY}
+    ${Boost_FILESYSTEM_LIBRARY}
         PUBLIC
     ${Boost_SYSTEM_LIBRARY}
     Threads::Threads
@@ -311,10 +331,6 @@ if (USE_CAPNP)
     if (NOT USE_INTERNAL_CAPNP_LIBRARY)
         target_include_directories (dbms SYSTEM BEFORE PRIVATE ${CAPNP_INCLUDE_DIR})
     endif ()
-endif ()
-
-if (USE_RDKAFKA)
-    target_link_libraries (dbms PRIVATE clickhouse_storage_kafka)
 endif ()
 
 if (USE_PARQUET)
