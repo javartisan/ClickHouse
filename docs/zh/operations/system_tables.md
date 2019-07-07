@@ -30,3 +30,28 @@ SELECT * FROM system.asynchronous_metrics LIMIT 10
 │ MarkCacheFiles                          │          0 │
 └─────────────────────────────────────────┴────────────┘
 ```
+
+**See Also**
+
+- [Monitoring](monitoring.md) — Clickhouse有关监控的基础概念.
+- [system.metrics](#system_tables-metrics) — 包含即时计算指标.
+- [system.events](#system_tables-events) — 包含一些发生的events.
+
+## system.clusters
+
+包含有关集群可用性的信息以及服务器节点信息。
+Columns:
+
+```
+cluster String      — 集群名字.
+shard_num UInt32 — 集群的shard数量，从1开始计数.
+shard_weight UInt32 — 写数据时候shard的权重.
+replica_num UInt32 — shard的副本数目, 从1开始计数.
+host_name String — 主机名字，从配置文件中获取的.
+String host_address — 主机IP地址，从DNS中解析获取.
+port UInt16 — 连接到该服务器的端口号.
+user String — 连接到服务器的用户名字.
+```
+
+## system.columns
+关于所有表的信息的列信息
