@@ -54,4 +54,6 @@ user String — 连接到服务器的用户名字.
 ```
 
 ## system.columns
-关于所有表的信息的列信息
+关于所有表的信息的列信息，你可以使用该表查询一些类似于[DESCRIBE TABLE](../query_language/misc.md#misc-describe-table) 名命令获取的信息，但是该表一次可以获取多张表的列信息.
+
+
